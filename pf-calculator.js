@@ -9,8 +9,17 @@ const pfForm = document.getElementById('pfForm');
 const resultsContainer = document.getElementById('resultsContainer');
 const resultsSummary = document.getElementById('resultsSummary');
 const resultsTable = document.getElementById('resultsTable');
+const incrementTable = document.getElementById('incrementTable');
+const incrementDetailsContainer = document.getElementById('incrementDetailsContainer');
 const themeToggle = document.getElementById('themeToggle');
 const pfGrowthChart = document.getElementById('pfGrowthChart');
+const standardTab = document.getElementById('standardTab');
+const importTab = document.getElementById('importTab');
+const standardCalculator = document.getElementById('standardCalculator');
+const importCalculator = document.getElementById('importCalculator');
+const enableIncrementsCheckbox = document.getElementById('enableIncrements');
+const toggleIncrementsButton = document.getElementById('toggleIncrements');
+const incrementsContainer = document.getElementById('incrementsContainer');
 
 // Chart instance
 let growthChart = null;
@@ -18,7 +27,9 @@ let growthChart = null;
 // Application State
 const state = {
     isDarkMode: false,
-    calculationResults: null
+    calculationResults: null,
+    activeTab: 'standard', // 'standard' or 'import'
+    incrementsEnabled: false
 };
 
 // Event Listeners
@@ -27,10 +38,34 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeTheme();
     
     // Form submission handler
-    pfForm.addEventListener('submit', handleFormSubmit);
+    if (pfForm) {
+        pfForm.addEventListener('submit', handleFormSubmit);
+    }
     
     // Theme toggle handler
-    themeToggle.addEventListener('click', toggleTheme);
+    if (themeToggle) {
+        themeToggle.addEventListener('click', toggleTheme);
+    }
+    
+    // Tab switching handlers
+    if (standardTab && importTab) {
+        standardTab.addEventListener('click', () => switchTab('standard'));
+        importTab.addEventListener('click', () => switchTab('import'));
+    }
+    
+    // Increment toggle handlers
+    if (enableIncrementsCheckbox) {
+        enableIncrementsCheckbox.addEventListener('change', toggleIncrementEnable);
+    }
+    
+    if (toggleIncrementsButton) {
+        toggleIncrementsButton.addEventListener('click', toggleIncrementDetails);
+    }
+    
+    // Initialize increment details container (hide by default)
+    if (incrementDetailsContainer) {
+        incrementDetailsContainer.classList.add('hidden');
+    }
 });
 
 /**
@@ -91,8 +126,33 @@ function handleFormSubmit(e) {
         return;
     }
     
-    // Calculate PF growth
-    const results = calculatePF(salary, employeeContribution, employerContribution, interestRate, years);
+    // Get increment settings if enabled
+    let incrementSettings = null;
+    if (state.incrementsEnabled) {
+        // Get employee increment settings
+        const employeeIncrementType = document.querySelector('input[name="employeeIncrementType"]:checked').value;
+        const employeeIncrementValue = parseFloat(document.getElementById('employeeIncrementValue').value);
+        
+        // Get employer increment settings
+        const employerIncrementType = document.querySelector('input[name="employerIncrementType"]:checked').value;
+        const employerIncrementValue = parseFloat(document.getElementById('employerIncrementValue').value);
+        
+        // Create increment settings object
+        incrementSettings = {
+            enabled: true,
+            employee: {
+                type: employeeIncrementType,
+                value: employeeIncrementValue
+            },
+            employer: {
+                type: employerIncrementType,
+                value: employerIncrementValue
+            }
+        };
+    }
+    
+    // Calculate PF growth with increment settings
+    const results = calculatePF(salary, employeeContribution, employerContribution, interestRate, years, incrementSettings);
     
     // Store results in state
     state.calculationResults = results;
@@ -159,22 +219,24 @@ function validateInputs(salary, employeeContribution, employerContribution, inte
 }
 
 /**
- * Calculate PF growth over the specified period
+ * Calculate PF growth over the specified period with optional increments
  * @param {number} salary - Monthly basic salary
  * @param {number} employeeContribution - Employee contribution rate
  * @param {number} employerContribution - Employer contribution rate
  * @param {number} interestRate - Annual interest rate
  * @param {number} years - Number of years
+ * @param {Object} incrementSettings - Optional increment settings
  * @returns {Object} - Calculation results
  */
-function calculatePF(salary, employeeContribution, employerContribution, interestRate, years) {
-    // Monthly contributions
-    const monthlyEmployeeContribution = salary * employeeContribution;
-    const monthlyEmployerContribution = salary * employerContribution;
-    const monthlyTotalContribution = monthlyEmployeeContribution + monthlyEmployerContribution;
+function calculatePF(salary, employeeContribution, employerContribution, interestRate, years, incrementSettings = null) {
+    // Initial monthly contributions
+    let currentMonthlySalary = salary;
+    let monthlyEmployeeContribution = currentMonthlySalary * employeeContribution;
+    let monthlyEmployerContribution = currentMonthlySalary * employerContribution;
     
     // Initialize arrays to store yearly data
     const yearlyData = [];
+    const incrementData = [];
     let totalEmployeeContribution = 0;
     let totalEmployerContribution = 0;
     let totalInterestEarned = 0;
@@ -182,43 +244,108 @@ function calculatePF(salary, employeeContribution, employerContribution, interes
     
     // Calculate year by year growth
     for (let year = 1; year <= years; year++) {
-        // Annual contributions
-        const annualEmployeeContribution = monthlyEmployeeContribution * 12;
-        const annualEmployerContribution = monthlyEmployerContribution * 12;
+        // Store increment data for this year
+        incrementData.push({
+            year,
+            monthlySalary: currentMonthlySalary,
+            monthlyEmployeeContribution,
+            monthlyEmployerContribution,
+            incrementApplied: year > 1 ? 'Yes' : 'No'
+        });
+        
+        // Track year's contributions
+        let yearEmployeeContribution = 0;
+        let yearEmployerContribution = 0;
+        let yearInterestEarned = 0;
+        
+        // Calculate month-by-month for more accuracy
+        for (let month = 0; month < 12; month++) {
+            // Add monthly contributions to annual totals
+            yearEmployeeContribution += monthlyEmployeeContribution;
+            yearEmployerContribution += monthlyEmployerContribution;
+            
+            // Add to balance
+            balance += monthlyEmployeeContribution + monthlyEmployerContribution;
+            
+            // Calculate monthly interest (annual rate / 12)
+            const monthlyInterest = balance * (interestRate / 12);
+            yearInterestEarned += monthlyInterest;
+            
+            // Add interest to balance
+            balance += monthlyInterest;
+        }
         
         // Update running totals
-        totalEmployeeContribution += annualEmployeeContribution;
-        totalEmployerContribution += annualEmployerContribution;
-        
-        // Calculate interest on previous balance + half of this year's contributions
-        // This approximation assumes contributions are made throughout the year
-        const interestBase = balance + (annualEmployeeContribution + annualEmployerContribution) / 2;
-        const yearlyInterest = interestBase * interestRate;
-        
-        // Update totals
-        totalInterestEarned += yearlyInterest;
-        balance += annualEmployeeContribution + annualEmployerContribution + yearlyInterest;
+        totalEmployeeContribution += yearEmployeeContribution;
+        totalEmployerContribution += yearEmployerContribution;
+        totalInterestEarned += yearInterestEarned;
         
         // Store yearly data
         yearlyData.push({
             year,
-            employeeContribution: annualEmployeeContribution,
-            employerContribution: annualEmployerContribution,
-            interest: yearlyInterest,
-            balance
+            employeeContribution: yearEmployeeContribution,
+            employerContribution: yearEmployerContribution,
+            interest: yearInterestEarned,
+            balance: Math.round(balance * 100) / 100
         });
+        
+        // Apply increments for the next year if needed
+        if (incrementSettings && incrementSettings.enabled && year < years) {
+            // Apply employee increment
+            if (incrementSettings.employee.type === 'percentage') {
+                // Percentage increase to monthly contribution
+                if (incrementSettings.employee.value > 0) {
+                    const employeeIncrementFactor = 1 + (incrementSettings.employee.value / 100);
+                    monthlyEmployeeContribution *= employeeIncrementFactor;
+                    
+                    // If contribution is percentage-based, we need to recalculate the effective salary
+                    if (employeeContribution > 0) {
+                        currentMonthlySalary = monthlyEmployeeContribution / employeeContribution;
+                    }
+                }
+            } else {
+                // Fixed amount increase
+                monthlyEmployeeContribution += incrementSettings.employee.value;
+                
+                // If contribution is percentage-based, we need to recalculate the effective salary
+                if (employeeContribution > 0) {
+                    currentMonthlySalary = monthlyEmployeeContribution / employeeContribution;
+                }
+            }
+            
+            // Apply employer increment
+            if (incrementSettings.employer.type === 'percentage') {
+                // Percentage increase
+                if (incrementSettings.employer.value > 0) {
+                    const employerIncrementFactor = 1 + (incrementSettings.employer.value / 100);
+                    monthlyEmployerContribution *= employerIncrementFactor;
+                }
+            } else {
+                // Fixed amount increase
+                monthlyEmployerContribution += incrementSettings.employer.value;
+            }
+        }
     }
+    
+    // Round final values for precision
+    monthlyEmployeeContribution = Math.round(monthlyEmployeeContribution * 100) / 100;
+    monthlyEmployerContribution = Math.round(monthlyEmployerContribution * 100) / 100;
     
     // Return calculation results
     return {
-        monthlyEmployeeContribution,
-        monthlyEmployerContribution,
-        monthlyTotalContribution,
+        initialMonthlySalary: salary,
+        finalMonthlySalary: currentMonthlySalary,
+        initialMonthlyEmployeeContribution: salary * employeeContribution,
+        initialMonthlyEmployerContribution: salary * employerContribution,
+        finalMonthlyEmployeeContribution: monthlyEmployeeContribution,
+        finalMonthlyEmployerContribution: monthlyEmployerContribution,
         totalEmployeeContribution,
         totalEmployerContribution,
         totalInterestEarned,
         maturityAmount: balance,
-        yearlyData
+        yearlyData,
+        incrementData,
+        incrementsApplied: incrementSettings && incrementSettings.enabled
     };
 }
 
@@ -241,39 +368,87 @@ function formatCurrency(amount) {
  * @param {Object} results - Calculation results
  */
 function displayResults(results) {
-    // Display summary
-    resultsSummary.innerHTML = `
-        <div class="summary__item">
-            <span class="summary__key">Monthly Employee Contribution:</span>
-            <span class="summary__value">${formatCurrency(results.monthlyEmployeeContribution)}</span>
-        </div>
-        <div class="summary__item">
-            <span class="summary__key">Monthly Employer Contribution:</span>
-            <span class="summary__value">${formatCurrency(results.monthlyEmployerContribution)}</span>
-        </div>
-        <div class="summary__item">
-            <span class="summary__key">Monthly Total Contribution:</span>
-            <span class="summary__value">${formatCurrency(results.monthlyTotalContribution)}</span>
-        </div>
-        <div class="summary__item">
-            <span class="summary__key">Total Employee Contribution:</span>
-            <span class="summary__value">${formatCurrency(results.totalEmployeeContribution)}</span>
-        </div>
-        <div class="summary__item">
-            <span class="summary__key">Total Employer Contribution:</span>
-            <span class="summary__value">${formatCurrency(results.totalEmployerContribution)}</span>
-        </div>
-        <div class="summary__item">
-            <span class="summary__key">Total Interest Earned:</span>
-            <span class="summary__value">${formatCurrency(results.totalInterestEarned)}</span>
-        </div>
-        <div class="summary__item">
-            <span class="summary__key">PF Maturity Amount:</span>
-            <span class="summary__value summary__value--large">${formatCurrency(results.maturityAmount)}</span>
-        </div>
-    `;
+    // Display summary with initial and final values if increments were applied
+    if (results.incrementsApplied) {
+        resultsSummary.innerHTML = `
+            <div class="summary__item">
+                <span class="summary__key">Initial Monthly Salary:</span>
+                <span class="summary__value">${formatCurrency(results.initialMonthlySalary)}</span>
+            </div>
+            <div class="summary__item">
+                <span class="summary__key">Final Monthly Salary:</span>
+                <span class="summary__value">${formatCurrency(results.finalMonthlySalary)}</span>
+            </div>
+            <div class="summary__item">
+                <span class="summary__key">Initial Monthly Employee Contribution:</span>
+                <span class="summary__value">${formatCurrency(results.initialMonthlyEmployeeContribution)}</span>
+            </div>
+            <div class="summary__item">
+                <span class="summary__key">Final Monthly Employee Contribution:</span>
+                <span class="summary__value">${formatCurrency(results.finalMonthlyEmployeeContribution)}</span>
+            </div>
+            <div class="summary__item">
+                <span class="summary__key">Initial Monthly Employer Contribution:</span>
+                <span class="summary__value">${formatCurrency(results.initialMonthlyEmployerContribution)}</span>
+            </div>
+            <div class="summary__item">
+                <span class="summary__key">Final Monthly Employer Contribution:</span>
+                <span class="summary__value">${formatCurrency(results.finalMonthlyEmployerContribution)}</span>
+            </div>
+            <div class="summary__divider"></div>
+            <div class="summary__item">
+                <span class="summary__key">Total Employee Contribution:</span>
+                <span class="summary__value">${formatCurrency(results.totalEmployeeContribution)}</span>
+            </div>
+            <div class="summary__item">
+                <span class="summary__key">Total Employer Contribution:</span>
+                <span class="summary__value">${formatCurrency(results.totalEmployerContribution)}</span>
+            </div>
+            <div class="summary__item">
+                <span class="summary__key">Total Interest Earned:</span>
+                <span class="summary__value">${formatCurrency(results.totalInterestEarned)}</span>
+            </div>
+            <div class="summary__item">
+                <span class="summary__key">PF Maturity Amount:</span>
+                <span class="summary__value summary__value--large">${formatCurrency(results.maturityAmount)}</span>
+            </div>
+        `;
+    } else {
+        // Standard display without increments
+        const monthlyTotalContribution = results.initialMonthlyEmployeeContribution + results.initialMonthlyEmployerContribution;
+        resultsSummary.innerHTML = `
+            <div class="summary__item">
+                <span class="summary__key">Monthly Employee Contribution:</span>
+                <span class="summary__value">${formatCurrency(results.initialMonthlyEmployeeContribution)}</span>
+            </div>
+            <div class="summary__item">
+                <span class="summary__key">Monthly Employer Contribution:</span>
+                <span class="summary__value">${formatCurrency(results.initialMonthlyEmployerContribution)}</span>
+            </div>
+            <div class="summary__item">
+                <span class="summary__key">Monthly Total Contribution:</span>
+                <span class="summary__value">${formatCurrency(monthlyTotalContribution)}</span>
+            </div>
+            <div class="summary__item">
+                <span class="summary__key">Total Employee Contribution:</span>
+                <span class="summary__value">${formatCurrency(results.totalEmployeeContribution)}</span>
+            </div>
+            <div class="summary__item">
+                <span class="summary__key">Total Employer Contribution:</span>
+                <span class="summary__value">${formatCurrency(results.totalEmployerContribution)}</span>
+            </div>
+            <div class="summary__item">
+                <span class="summary__key">Total Interest Earned:</span>
+                <span class="summary__value">${formatCurrency(results.totalInterestEarned)}</span>
+            </div>
+            <div class="summary__item">
+                <span class="summary__key">PF Maturity Amount:</span>
+                <span class="summary__value summary__value--large">${formatCurrency(results.maturityAmount)}</span>
+            </div>
+        `;
+    }
     
-    // Populate table
+    // Populate main results table
     const tableBody = resultsTable.querySelector('tbody');
     tableBody.innerHTML = '';
     
@@ -289,6 +464,29 @@ function displayResults(results) {
         tableBody.appendChild(row);
     });
     
+    // Show/hide increment details table
+    if (results.incrementsApplied && incrementDetailsContainer && incrementTable) {
+        incrementDetailsContainer.classList.remove('hidden');
+        
+        // Populate increment details table
+        const incrementTableBody = incrementTable.querySelector('tbody');
+        incrementTableBody.innerHTML = '';
+        
+        results.incrementData.forEach(data => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${data.year}</td>
+                <td>${formatCurrency(data.monthlySalary)}</td>
+                <td>${formatCurrency(data.monthlyEmployeeContribution)}</td>
+                <td>${formatCurrency(data.monthlyEmployerContribution)}</td>
+                <td>${data.incrementApplied}</td>
+            `;
+            incrementTableBody.appendChild(row);
+        });
+    } else if (incrementDetailsContainer) {
+        incrementDetailsContainer.classList.add('hidden');
+    }
+    
     // Generate chart
     createChart(results);
 }
@@ -301,18 +499,39 @@ function createChart(results) {
     const ctx = pfGrowthChart.getContext('2d');
     const years = results.yearlyData.map(data => `Year ${data.year}`);
     const balances = results.yearlyData.map(data => data.balance);
-    const employeeContributions = results.yearlyData.map((data, index) => 
-        index === 0 ? data.employeeContribution : 
-        results.yearlyData[index-1].employeeContribution + data.employeeContribution
-    );
-    const employerContributions = results.yearlyData.map((data, index) => 
-        index === 0 ? data.employerContribution : 
-        results.yearlyData[index-1].employerContribution + data.employerContribution
-    );
-    const interestEarned = results.yearlyData.map((data, index) => 
-        index === 0 ? data.interest : 
-        results.yearlyData[index-1].interest + data.interest
-    );
+    
+    // Calculate cumulative values year-by-year
+    let cumulativeEmployeeContribution = 0;
+    let cumulativeEmployerContribution = 0;
+    let cumulativeInterest = 0;
+    
+    const employeeContributions = [];
+    const employerContributions = [];
+    const interestEarned = [];
+    
+    // Calculate yearly contributions and interest with proper accumulation
+    results.yearlyData.forEach(data => {
+        cumulativeEmployeeContribution += data.employeeContribution;
+        cumulativeEmployerContribution += data.employerContribution;
+        cumulativeInterest += data.interest;
+        
+        employeeContributions.push(cumulativeEmployeeContribution);
+        employerContributions.push(cumulativeEmployerContribution);
+        interestEarned.push(cumulativeInterest);
+    });
+    
+    // For showing year-on-year growth rates if increments are applied
+    const yearlyGrowthRates = [];
+    if (results.incrementsApplied) {
+        // Calculate growth rates between years
+        for (let i = 1; i < results.yearlyData.length; i++) {
+            const previousYear = results.yearlyData[i-1];
+            const currentYear = results.yearlyData[i];
+            const growthRate = ((currentYear.balance / previousYear.balance) - 1) * 100;
+            yearlyGrowthRates.push(growthRate.toFixed(2));
+        }
+        yearlyGrowthRates.unshift(0); // No growth rate for first year
+    }
     
     // Determine chart colors based on theme
     const chartColors = getChartColors();
@@ -322,74 +541,141 @@ function createChart(results) {
         growthChart.destroy();
     }
     
+    // Prepare datasets array
+    const datasets = [
+        {
+            label: 'Employee Contribution',
+            data: employeeContributions,
+            backgroundColor: chartColors.employeeContribution,
+            stack: 'Stack 0',
+        }, 
+        {
+            label: 'Employer Contribution',
+            data: employerContributions,
+            backgroundColor: chartColors.employerContribution,
+            stack: 'Stack 0',
+        }, 
+        {
+            label: 'Interest Earned',
+            data: interestEarned,
+            backgroundColor: chartColors.interest,
+            stack: 'Stack 0',
+        }, 
+        {
+            type: 'line',
+            label: 'Total Balance',
+            data: balances,
+            borderColor: chartColors.balanceLine,
+            backgroundColor: 'transparent',
+            borderWidth: 2,
+            pointBackgroundColor: chartColors.balanceLine,
+            tension: 0.1
+        }
+    ];
+    
+    // Add growth rate dataset if increments are applied
+    if (results.incrementsApplied) {
+        datasets.push({
+            type: 'line',
+            label: 'YoY Growth Rate (%)',
+            data: yearlyGrowthRates,
+            borderColor: chartColors.growthLine,
+            backgroundColor: 'transparent',
+            borderWidth: 2,
+            borderDash: [5, 5],
+            pointBackgroundColor: chartColors.growthLine,
+            tension: 0.1,
+            yAxisID: 'y1'
+        });
+    }
+    
+    // Configure chart options
+    const chartOptions = {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            x: {
+                stacked: true,
+                grid: {
+                    display: false
+                }
+            },
+            y: {
+                stacked: true,
+                beginAtZero: true,
+                ticks: {
+                    callback: function(value) {
+                        return '₹' + value.toLocaleString('en-IN');
+                    }
+                },
+                title: {
+                    display: true,
+                    text: 'Amount (₹)'
+                }
+            }
+        },
+        plugins: {
+            tooltip: {
+                callbacks: {
+                    label: function(context) {
+                        let label = context.dataset.label || '';
+                        if (label) {
+                            label += ': ';
+                        }
+                        if (context.parsed.y !== null) {
+                            if (label.includes('Growth Rate')) {
+                                label += context.parsed.y + '%';
+                            } else {
+                                label += formatCurrency(context.parsed.y);
+                            }
+                        }
+                        return label;
+                    }
+                }
+            },
+            title: {
+                display: true,
+                text: results.incrementsApplied ? 
+                    'PF Growth Over Time (with Annual Increments)' : 
+                    'PF Growth Over Time',
+                font: {
+                    size: 16
+                }
+            },
+            legend: {
+                position: 'bottom'
+            }
+        }
+    };
+    
+    // Add secondary y-axis if showing growth rates
+    if (results.incrementsApplied) {
+        chartOptions.scales.y1 = {
+            position: 'right',
+            beginAtZero: true,
+            grid: {
+                drawOnChartArea: false
+            },
+            ticks: {
+                callback: function(value) {
+                    return value + '%';
+                }
+            },
+            title: {
+                display: true,
+                text: 'Growth Rate (%)'
+            }
+        };
+    }
+    
     // Create new chart
     growthChart = new Chart(ctx, {
         type: 'bar',
         data: {
             labels: years,
-            datasets: [{
-                label: 'Employee Contribution',
-                data: employeeContributions,
-                backgroundColor: chartColors.employeeContribution,
-                stack: 'Stack 0',
-            }, {
-                label: 'Employer Contribution',
-                data: employerContributions,
-                backgroundColor: chartColors.employerContribution,
-                stack: 'Stack 0',
-            }, {
-                label: 'Interest Earned',
-                data: interestEarned,
-                backgroundColor: chartColors.interest,
-                stack: 'Stack 0',
-            }, {
-                type: 'line',
-                label: 'Total Balance',
-                data: balances,
-                borderColor: chartColors.balanceLine,
-                backgroundColor: 'transparent',
-                borderWidth: 2,
-                pointBackgroundColor: chartColors.balanceLine,
-                tension: 0.1
-            }]
+            datasets: datasets
         },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                x: {
-                    stacked: true,
-                    grid: {
-                        display: false
-                    }
-                },
-                y: {
-                    stacked: true,
-                    beginAtZero: true,
-                    ticks: {
-                        callback: function(value) {
-                            return '₹' + value.toLocaleString('en-IN');
-                        }
-                    }
-                }
-            },
-            plugins: {
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            let label = context.dataset.label || '';
-                            if (label) {
-                                label += ': ';
-                            }
-                            if (context.parsed.y !== null) {
-                                label += formatCurrency(context.parsed.y);
-                            }
-                            return label;
-                        }
-                    }
-                }
-            }
-        }
+        options: chartOptions
     });
 }
 
@@ -403,14 +689,16 @@ function getChartColors() {
             employeeContribution: 'rgba(76, 201, 240, 0.7)',
             employerContribution: 'rgba(114, 9, 183, 0.7)',
             interest: 'rgba(247, 37, 133, 0.7)',
-            balanceLine: '#4cc9f0'
+            balanceLine: '#4cc9f0',
+            growthLine: '#f72585'
         };
     } else {
         return {
             employeeContribution: 'rgba(67, 97, 238, 0.7)',
             employerContribution: 'rgba(72, 149, 239, 0.7)',
             interest: 'rgba(63, 55, 201, 0.7)',
-            balanceLine: '#3f37c9'
+            balanceLine: '#3f37c9',
+            growthLine: '#f3722c'
         };
     }
 }
@@ -427,5 +715,62 @@ function updateChart() {
         growthChart.data.datasets[3].borderColor = chartColors.balanceLine;
         growthChart.data.datasets[3].pointBackgroundColor = chartColors.balanceLine;
         growthChart.update();
+    }
+}
+
+/**
+ * Switch between calculator tabs (standard and import)
+ * @param {string} tab - Tab to switch to ('standard' or 'import')
+ */
+function switchTab(tab) {
+    // Update state
+    state.activeTab = tab;
+    
+    // Update tab styling
+    if (standardTab && importTab) {
+        if (tab === 'standard') {
+            standardTab.classList.add('tabs__tab--active');
+            importTab.classList.remove('tabs__tab--active');
+            
+            standardCalculator.classList.remove('hidden');
+            importCalculator.classList.add('hidden');
+        } else {
+            importTab.classList.add('tabs__tab--active');
+            standardTab.classList.remove('tabs__tab--active');
+            
+            importCalculator.classList.remove('hidden');
+            standardCalculator.classList.add('hidden');
+        }
+    }
+}
+
+/**
+ * Toggle increment enable/disable state
+ */
+function toggleIncrementEnable() {
+    state.incrementsEnabled = enableIncrementsCheckbox.checked;
+    
+    if (state.incrementsEnabled) {
+        toggleIncrementsButton.setAttribute('aria-expanded', 'true');
+        incrementsContainer.classList.remove('hidden');
+    } else {
+        toggleIncrementsButton.setAttribute('aria-expanded', 'false');
+        incrementsContainer.classList.add('hidden');
+    }
+}
+
+/**
+ * Toggle display of increment details form
+ */
+function toggleIncrementDetails() {
+    const expanded = toggleIncrementsButton.getAttribute('aria-expanded') === 'true';
+    toggleIncrementsButton.setAttribute('aria-expanded', !expanded);
+    
+    if (!expanded) {
+        incrementsContainer.classList.remove('hidden');
+        enableIncrementsCheckbox.checked = true;
+        state.incrementsEnabled = true;
+    } else {
+        incrementsContainer.classList.add('hidden');
     }
 }
