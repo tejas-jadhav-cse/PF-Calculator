@@ -27,6 +27,7 @@
     --backdrop-blur: 10px;
 }
 
+//dark theme
 .dark-theme {
     --color-primary: #4cc9f0;
     --color-primary-light: #4895ef;
